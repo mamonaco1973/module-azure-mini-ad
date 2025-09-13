@@ -40,14 +40,14 @@ Here’s how you can use the module in your Terraform configuration:
 ```hcl
 module "mini_ad" {
   source            = "github.com/mamonaco1973/module-azure-mini-ad"
-  location          = var.resource_group_location
-  netbios           = var.netbios
+  location          = "Central US"
+  netbios           = "MCLOUD"
   vnet_id           = azurerm_virtual_network.ad_vnet.id
-  realm             = var.realm
+  realm             = "MCLOUD.MIKECLOUD.COM"
   users_json        = local.users_json
-  user_base_dn      = var.user_base_dn
+  user_base_dn      = "CN=Users,DC=mcloud,DC=mikecloud,DC=com"
   ad_admin_password = random_password.admin_password.result
-  dns_zone          = var.dns_zone
+  dns_zone          = "mcloud.mikecloud.com"
   subnet_id         = azurerm_subnet.mini_ad_subnet.id
   admin_password    = random_password.sysadmin_password.result
 }

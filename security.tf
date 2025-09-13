@@ -177,7 +177,7 @@ resource "azurerm_network_security_group" "mini_ad_nsg" {
   # ------------------------------------------------------------------------------------------------
   security_rule {
     name                       = "HTTP"
-    priority                   = 160
+    priority                   = 165
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"

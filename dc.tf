@@ -1,89 +1,101 @@
 # ==================================================================================================
-# Fetch the Canonical-published Ubuntu 24.04 AMI ID from AWS Systems Manager Parameter Store
-# This path is maintained by Canonical; it always points at the current stable AMI for 24.04 (amd64, HVM, gp3)
+# Network Interface and Linux VM Deployment
+# Purpose:
+#   - Create a dedicated NIC for the Samba-based Active Directory Domain Controller (AD DC).
+#   - Provision an Ubuntu-based Linux VM configured as the AD DC.
+#   - Ensure proper sequencing with Key Vault and DNS integration.
+#
+# Notes:
+#   - Uses Ubuntu 24.04 LTS as the base image.
+#   - Bootstraps Samba AD DC with a cloud-init script (`mini-ad.sh.template`).
+#   - Relies on system-assigned managed identity for secure Key Vault access.
 # ==================================================================================================
-data "aws_ssm_parameter" "ubuntu_24_04" {
-  name = "/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
+
+# --------------------------------------------------------------------------------------------------
+# Create Network Interface (NIC) for the Linux VM
+# --------------------------------------------------------------------------------------------------
+resource "azurerm_network_interface" "mini_ad_vm_nic" {
+  name                = "mini-ad-nic"                          # NIC resource name
+  location            = var.location                           # Same region as resource group
+  resource_group_name = azurerm_resource_group.mini_ad_rg.name # Same resource group
+
+  # NIC IP configuration (internal/private use only)
+  ip_configuration {
+    name                          = "internal"    # Config label
+    subnet_id                     = var.subnet_id # Attach NIC to VM subnet
+    private_ip_address_allocation = "Dynamic"     # Auto-assign private IP
+  }
 }
 
-# ==================================================================================================
-# Resolve the full AMI object using the ID returned by SSM
-# - Restrict owner to Canonical to avoid spoofed AMIs
-# - Filter by the exact image-id pulled above
-# - most_recent is kept true as a guard when multiple matches exist in a region
-# ==================================================================================================
-data "aws_ami" "ubuntu_ami" {
-  most_recent = true
-  owners      = ["099720109477"] # Canonical
+# --------------------------------------------------------------------------------------------------
+# Provision Linux Virtual Machine (Ubuntu 24.04 LTS)
+# Acts as the Samba-based AD Domain Controller
+# --------------------------------------------------------------------------------------------------
+resource "azurerm_linux_virtual_machine" "mini_ad_instance" {
+  name                            = "mini-ad-dc-${lower(var.netbios)}"     # VM name includes NetBIOS
+  location                        = var.location                           # Same region
+  resource_group_name             = azurerm_resource_group.mini_ad_rg.name # Same resource group
+  size                            = var.vm_size                            # Small/cheap VM size (lab use)
+  admin_username                  = var.admin_username                     # Local admin account
+  admin_password                  = var.admin_password                     # Local admin password
+  disable_password_authentication = false                                  # Allow password login (lab convenience)
 
-  filter {
-    name   = "image-id"
-    values = [data.aws_ssm_parameter.ubuntu_24_04.value]
+  # Attach NIC to VM
+  network_interface_ids = [
+    azurerm_network_interface.mini_ad_vm_nic.id
+  ]
+
+  # Configure OS Disk
+  os_disk {
+    caching              = "ReadWrite"    # Enable RW caching for faster access
+    storage_account_type = "Standard_LRS" # Low-cost standard storage (locally redundant)
+  }
+
+  # Base OS image (Ubuntu 24.04 LTS from Canonical Marketplace)
+  source_image_reference {
+    publisher = "canonical"        # Ubuntu publisher
+    offer     = "ubuntu-24_04-lts" # Ubuntu 24.04 LTS
+    sku       = "server"           # Server SKU
+    version   = "latest"           # Always use latest patch version
+  }
+
+  # Bootstrap configuration (cloud-init script encoded in base64)
+  # Template injects variables such as domain details and admin passwords.
+  custom_data = base64encode(templatefile("${path.module}/scripts/mini-ad.sh.template", {
+    HOSTNAME_DC        = "ad1"                      # Hostname for DC
+    DNS_ZONE           = var.dns_zone               # DNS zone (e.g., mcloud.mikecloud.com)
+    REALM              = var.realm                  # Kerberos realm
+    NETBIOS            = var.netbios                # NetBIOS name
+    ADMINISTRATOR_PASS = var.ad_admin_password      # AD Admin password
+    ADMIN_USER_PASS    = var.ad_admin_password      # Domain user password
+    USER_BASE_DN       = var.user_base_dn           # User base DN for LDAP
+    USERS_JSON         = local.effective_users_json # User accounts JSON
+  }))
+
+  # Assign a managed identity 
+  identity {
+    type = "SystemAssigned"
   }
 }
 
 # ==================================================================================================
-# EC2 instance: Ubuntu 24.04 for Samba-based mini-AD DC
-# - Private subnet only (no public IP)
-# - IAM instance profile enables SSM connectivity (Session Manager, etc.)
-# - User data renders from a template with domain settings and admin secrets
+# DNS Integration
+# Ensures the AD DC is fully operational before pointing VNet to it for DNS resolution.
 # ==================================================================================================
-resource "aws_instance" "mini_ad_dc_instance" {
-  ami                    = data.aws_ami.ubuntu_ami.id
-  instance_type          = var.instance_type             # Small, adequate for lab AD DC; scale up for real loads
-  subnet_id              = var.subnet_id                 # Place in private subnet
-  vpc_security_group_ids = [aws_security_group.ad_sg.id] # Open required AD/DC ports per your SG
 
-  associate_public_ip_address = false # Private-only; reach it via SSM/bastion/VPN
-
-  iam_instance_profile = aws_iam_instance_profile.ec2_ssm_profile.name
-
-  user_data = templatefile("${path.module}/scripts/mini-ad.sh.template", {
-    HOSTNAME_DC        = "ad1"
-    DNS_ZONE           = var.dns_zone
-    REALM              = var.realm
-    NETBIOS            = var.netbios
-    ADMINISTRATOR_PASS = var.ad_admin_password
-    ADMIN_USER_PASS    = var.ad_admin_password
-    USERS_JSON         = local.effective_users_json
-  })
-
-  tags = {
-    Name = "mini-ad-dc-${lower(var.netbios)}"
-  }
-}
-
-# ==================================================================================================
-# DHCP options for the VPC to direct instances to this DC for DNS
-# - domain_name: sets the search suffix (your AD DNS zone)
-# - domain_name_servers: points DHCP clients at the DC’s private IP for lookups
-# ==================================================================================================
-resource "aws_vpc_dhcp_options" "mini_ad_dns" {
-  domain_name         = var.dns_zone
-  domain_name_servers = [aws_instance.mini_ad_dc_instance.private_ip]
-
-  tags = {
-    Name = "mini-ad-dns"
-  }
-}
-
-# ==================================================================================================
-# Delay to allow the DC to finish provisioning (Samba/DNS up) before associating DHCP options
-# Adjust duration to your bootstrap time; 180s is a conservative lab default
-# ==================================================================================================
+# Wait for AD DC provisioning (Samba/DNS startup)
+# Conservative 180s delay → adjust if bootstrap time differs.
 resource "time_sleep" "wait_for_mini_ad" {
-  depends_on      = [aws_instance.mini_ad_dc_instance]
+  depends_on      = [azurerm_linux_virtual_machine.mini_ad_instance]
   create_duration = "180s"
 }
 
-# ==================================================================================================
-# Associate the custom DHCP options with the VPC once the DC is up
-# This causes new DHCP leases to prefer the DC for DNS resolution within the VPC
-# ==================================================================================================
-resource "aws_vpc_dhcp_options_association" "mini_ad_dns_assoc" {
-  vpc_id          = var.vpc_id
-  dhcp_options_id = aws_vpc_dhcp_options.mini_ad_dns.id
-  depends_on      = [time_sleep.wait_for_mini_ad]
+# Update Virtual Network DNS to point to the AD DC
+# Required for domain joins and internal name resolution.
+resource "azurerm_virtual_network_dns_servers" "mini_ad_dns_server" {
+  virtual_network_id = var.vnet_id
+  dns_servers        = [azurerm_network_interface.mini_ad_vm_nic.ip_configuration[0].private_ip_address]
+  depends_on         = [time_sleep.wait_for_mini_ad]
 }
 
 
@@ -98,11 +110,11 @@ resource "aws_vpc_dhcp_options_association" "mini_ad_dns_assoc" {
 
 locals {
   default_users_json = templatefile("${path.module}/scripts/users.json.template", {
-    USER_BASE_DN      = var.user_base_dn      # Base DN for placing new users in LDAP
-    DNS_ZONE          = var.dns_zone          # AD-integrated DNS zone
-    REALM             = var.realm             # Kerberos realm (FQDN in uppercase)
-    NETBIOS           = var.netbios           # NetBIOS domain name
-    sysadmin_password = var.ad_admin_password # Sysadmin password
+    USER_BASE_DN      = var.user_base_dn   # Base DN for placing new users in LDAP
+    DNS_ZONE          = var.dns_zone       # AD-integrated DNS zone
+    REALM             = var.realm          # Kerberos realm (FQDN in uppercase)
+    NETBIOS           = var.netbios        # NetBIOS domain name
+    sysadmin_password = var.admin_password # Sysadmin password
   })
 }
 
@@ -115,3 +127,11 @@ locals {
 locals {
   effective_users_json = coalesce(var.users_json, local.default_users_json)
 }
+
+
+# # --- Save the rendered script to a local file temporarily ---
+# resource "local_file" "ad_join_rendered" {
+#   filename = "/tmp/users.json"          # Save rendered script as 'users.json'
+#   content  = local.default_users_json   # Use content from the templatefile rendered in locals
+# }
+

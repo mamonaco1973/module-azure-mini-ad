@@ -1,8 +1,14 @@
 # ==================================================================================================
 # Variables for mini-ad module
 # Purpose:
-#   - Define all input parameters required for provisioning the Samba AD DC EC2
+#   - Define all input parameters required for provisioning the Samba AD DC VM,
+#     associated NIC, DNS integration, and resource group.
 # ==================================================================================================
+
+variable "location" {
+  description = "Azure region where resources will be created."
+  type        = string
+}
 
 variable "dns_zone" {
   description = "DNS zone for the Samba AD domain (e.g., mcloud.mikecloud.com)."
@@ -24,25 +30,37 @@ variable "user_base_dn" {
   type        = string
 }
 
-variable "instance_type" {
-  description = "Size of the AD DC EC2 instance."
+variable "vm_size" {
+  description = "Size of the AD DC VM."
   type        = string
-  default     = "t3.small"
+  default     = "Standard_B1s"
+}
+
+variable "admin_username" {
+  description = "Local admin username for the Linux VM."
+  type        = string
+  default     = "sysadmin"
+}
+
+variable "admin_password" {
+  description = "Local admin password for the Linux VM."
+  type        = string
+  sensitive   = true
 }
 
 variable "ad_admin_password" {
-  description = "Password for the AD Administrator and Admin account used in Samba bootstrap."
+  description = "Password for the AD Administrator account used in Samba bootstrap."
   type        = string
   sensitive   = true
 }
 
 variable "subnet_id" {
-  description = "ID of the subnet where the EC2 instance will be attached."
+  description = "ID of the subnet where the NIC/VM will be attached."
   type        = string
 }
 
-variable "vpc_id" {
-  description = "ID of the Virtual Private Cloud (VPC) for DNS server updates."
+variable "vnet_id" {
+  description = "ID of the Virtual Network for DNS server updates."
   type        = string
 }
 

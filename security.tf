@@ -1,172 +1,298 @@
 # ==================================================================================================
-# Security Group: mini-ad-sg
-# Purpose: Allow all required ports for a Samba-based Active Directory Domain Controller.
-# NOTE: Currently open to all IPv4 (0.0.0.0/0) for simplicity — secure this in production.
+# Resource: Network Security Group (mini-ad-nsg)
+# Purpose:
+#   Defines inbound and outbound firewall rules required for a Samba-based
+#   Active Directory Domain Controller (AD DC) hosted on Azure.
+#
+# Notes:
+#   - Current rules allow traffic from any IPv4 source (0.0.0.0/0).
+#     This is acceptable for prototyping and labs but **not secure for production**.
+#   - In production, restrict source_address_prefix to known IP ranges,
+#     corporate VPNs, or peered VNets.
 # ==================================================================================================
-resource "aws_security_group" "ad_sg" {
-  name        = "mini-ad-sg"
-  description = "Security group for mini Active Directory services (open to all IPv4)"
-  vpc_id      = var.vpc_id
 
-  # -----------------------------------
-  # DNS (TCP/UDP 53) – name resolution for clients and AD replication
-  # -----------------------------------
-  ingress {
-    from_port   = 53
-    to_port     = 53
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+resource "azurerm_network_security_group" "mini_ad_nsg" {
+  name                = "mini-ad-nsg"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.mini_ad_rg.name
+
+  # ------------------------------------------------------------------------------------------------
+  # DNS (TCP/UDP 53)
+  # Required for name resolution within the Active Directory domain.
+  # ------------------------------------------------------------------------------------------------
+  security_rule {
+    name                       = "DNS-TCP"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "53"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
   }
-  ingress {
-    from_port   = 53
-    to_port     = 53
-    protocol    = "udp"
-    cidr_blocks = ["0.0.0.0/0"]
+  security_rule {
+    name                       = "DNS-UDP"
+    priority                   = 101
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Udp"
+    source_port_range          = "*"
+    destination_port_range     = "53"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
   }
 
-  # -----------------------------------
+  # ------------------------------------------------------------------------------------------------
   # Kerberos Authentication (TCP/UDP 88)
-  # -----------------------------------
-  ingress {
-    from_port   = 88
-    to_port     = 88
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  # Core authentication protocol for Active Directory (used by domain logins).
+  # ------------------------------------------------------------------------------------------------
+  security_rule {
+    name                       = "Kerberos-TCP"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "88"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
   }
-  ingress {
-    from_port   = 88
-    to_port     = 88
-    protocol    = "udp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # -----------------------------------
-  # LDAP (TCP/UDP 389) – directory queries & updates
-  # -----------------------------------
-  ingress {
-    from_port   = 389
-    to_port     = 389
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
-    from_port   = 389
-    to_port     = 389
-    protocol    = "udp"
-    cidr_blocks = ["0.0.0.0/0"]
+  security_rule {
+    name                       = "Kerberos-UDP"
+    priority                   = 111
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Udp"
+    source_port_range          = "*"
+    destination_port_range     = "88"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
   }
 
-  # -----------------------------------
-  # SMB/CIFS file sharing (TCP 445) – required for AD SYSVOL & NETLOGON shares
-  # -----------------------------------
-  ingress {
-    from_port   = 445
-    to_port     = 445
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  # ------------------------------------------------------------------------------------------------
+  # LDAP (TCP/UDP 389)
+  # Used for directory queries (binds, searches, authentication lookups).
+  # ------------------------------------------------------------------------------------------------
+  security_rule {
+    name                       = "LDAP-TCP"
+    priority                   = 120
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "389"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+  security_rule {
+    name                       = "LDAP-UDP"
+    priority                   = 121
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Udp"
+    source_port_range          = "*"
+    destination_port_range     = "389"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
   }
 
-  # -----------------------------------
-  # Kerberos Change/Set Password (TCP/UDP 464)
-  # -----------------------------------
-  ingress {
-    from_port   = 464
-    to_port     = 464
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
-    from_port   = 464
-    to_port     = 464
-    protocol    = "udp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # -----------------------------------
-  # RPC Endpoint Mapper (TCP 135) – locates RPC services
-  # -----------------------------------
-  ingress {
-    from_port   = 135
-    to_port     = 135
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  # ------------------------------------------------------------------------------------------------
+  # SMB / CIFS (TCP 445)
+  # Required for file shares, SYSVOL/NETLOGON replication, and domain logon scripts.
+  # ------------------------------------------------------------------------------------------------
+  security_rule {
+    name                       = "SMB"
+    priority                   = 130
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "445"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
   }
 
-  # -----------------------------------
+  # ------------------------------------------------------------------------------------------------
+  # Kerberos Password Change (TCP/UDP 464)
+  # Required for domain users to change or reset their passwords.
+  # ------------------------------------------------------------------------------------------------
+  security_rule {
+    name                       = "KerberosPwd-TCP"
+    priority                   = 140
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "464"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+  security_rule {
+    name                       = "KerberosPwd-UDP"
+    priority                   = 141
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Udp"
+    source_port_range          = "*"
+    destination_port_range     = "464"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  # ------------------------------------------------------------------------------------------------
+  # RPC Endpoint Mapper (TCP 135)
+  # Enables RPC-based services such as AD replication, Group Policy, and management tools.
+  # ------------------------------------------------------------------------------------------------
+  security_rule {
+    name                       = "RPC-135"
+    priority                   = 150
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "135"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  # ------------------------------------------------------------------------------------------------
   # HTTPS (TCP 443)
-  # -----------------------------------
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  # Provides secure communication for web-based management and LDAPS fallback.
+  # ------------------------------------------------------------------------------------------------
+  security_rule {
+    name                       = "HTTPS"
+    priority                   = 160
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
   }
-  
-  # -----------------------------------
+
+  # ------------------------------------------------------------------------------------------------
   # HTTP (TCP 80)
-  # -----------------------------------
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  # ------------------------------------------------------------------------------------------------
+  security_rule {
+    name                       = "HTTP"
+    priority                   = 160
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "80"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
   }
 
-  # -----------------------------------
-  # LDAP over SSL (TCP 636) – secure directory queries
-  # -----------------------------------
-  ingress {
-    from_port   = 636
-    to_port     = 636
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  # ------------------------------------------------------------------------------------------------
+  # LDAPS (TCP 636)
+  # Encrypted LDAP (TLS/SSL) – required for secure directory queries.
+  # ------------------------------------------------------------------------------------------------
+  security_rule {
+    name                       = "LDAPS"
+    priority                   = 170
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "636"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
   }
 
-  # -----------------------------------
-  # Global Catalog (TCP 3268/3269) – forest-wide directory searches
-  # -----------------------------------
-  ingress {
-    from_port   = 3268
-    to_port     = 3268
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  # ------------------------------------------------------------------------------------------------
+  # Global Catalog (TCP 3268, 3269)
+  # Facilitates forest-wide searches across multiple domains.
+  #  - 3268: Unencrypted Global Catalog
+  #  - 3269: Encrypted Global Catalog (TLS/SSL)
+  # ------------------------------------------------------------------------------------------------
+  security_rule {
+    name                       = "GC-3268"
+    priority                   = 180
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "3268"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
   }
-  ingress {
-    from_port   = 3269
-    to_port     = 3269
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # -----------------------------------
-  # Ephemeral RPC Ports (TCP 49152–65535) – dynamic RPC communications
-  # -----------------------------------
-  ingress {
-    from_port   = 49152
-    to_port     = 65535
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # -----------------------------------
-  # NTP (UDP 123) – time synchronization
-  # -----------------------------------
-  ingress {
-    from_port   = 123
-    to_port     = 123
-    protocol    = "udp"
-    cidr_blocks = ["0.0.0.0/0"]
+  security_rule {
+    name                       = "GC-3269"
+    priority                   = 181
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "3269"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
   }
 
-  # -----------------------------------
-  # Allow all outbound traffic (full egress)
-  # -----------------------------------
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+  # ------------------------------------------------------------------------------------------------
+  # Ephemeral RPC Ports (TCP 49152–65535)
+  # Dynamic high ports required by Active Directory for RPC communication.
+  # Without this range, AD replication and GPO processing may fail.
+  # ------------------------------------------------------------------------------------------------
+  security_rule {
+    name                       = "Ephemeral-RPC"
+    priority                   = 190
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_ranges    = ["49152-65535"]
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
   }
 
-  tags = { Name = "mini-ad-sg" }
+  # ------------------------------------------------------------------------------------------------
+  # NTP (UDP 123)
+  # Time synchronization required for Kerberos authentication to function properly.
+  # ------------------------------------------------------------------------------------------------
+  security_rule {
+    name                       = "NTP"
+    priority                   = 200
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Udp"
+    source_port_range          = "*"
+    destination_port_range     = "123"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  # ------------------------------------------------------------------------------------------------
+  # Outbound Rules
+  # Allow all outbound traffic (simplifies AD services which often initiate connections).
+  # In production, refine to required destinations only.
+  # ------------------------------------------------------------------------------------------------
+  security_rule {
+    name                       = "AllowAllOutbound"
+    priority                   = 1000
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  tags = {
+    Name = "mini-ad-nsg"
+  }
+}
+
+# ==================================================================================================
+# Resource: Subnet → NSG Association
+# Purpose:
+#   Binds the defined NSG to the subnet hosting the mini Active Directory controller.
+# ==================================================================================================
+resource "azurerm_subnet_network_security_group_association" "mini_ad_subnet_assoc" {
+  subnet_id                 = var.subnet_id
+  network_security_group_id = azurerm_network_security_group.mini_ad_nsg.id
 }

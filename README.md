@@ -54,8 +54,8 @@ module "mini_ad" {
 ```
 ## Outputs
 
-- **domain_name** — Configured DNS domain  
-- **netbios_name** — NetBIOS short name  
+- **dns_server** — Configured DNS server
+- **resource_group_name** — Resource Group for Mini-AD Components  
 
 ## Limitations
 

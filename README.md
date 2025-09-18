@@ -54,8 +54,6 @@ module "mini_ad" {
 ```
 ## Outputs
 
-- **dc_public_ip** — Public IP of the Domain Controller (if enabled)  
-- **dc_private_ip** — Internal IP of the Domain Controller  
 - **domain_name** — Configured DNS domain  
 - **netbios_name** — NetBIOS short name  
 

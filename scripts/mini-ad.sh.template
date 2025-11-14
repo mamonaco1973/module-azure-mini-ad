@@ -112,6 +112,13 @@ if [ ! -f /var/lib/samba/private/sam.ldb ]; then
   sed -i '/^\[global\]/a dns forwarder = 168.63.129.16' /etc/samba/smb.conf
 
   # --------------------------------------------------------------------
+  # ENABLE INSECURE LDAP SIMPLE BINDS
+  # (Allows ldapsearch -x -H ldap://<dc>)
+  # --------------------------------------------------------------------
+  sed -i '/^\s*ldap server require strong auth/d' /etc/samba/smb.conf
+  sed -i '/^\[global\]/a ldap server require strong auth = no' /etc/samba/smb.conf
+  
+  # --------------------------------------------------------------------
   # Replace system Kerberos config with Samba-generated config
   # --------------------------------------------------------------------
   

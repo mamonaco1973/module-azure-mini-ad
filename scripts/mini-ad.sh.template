@@ -289,7 +289,10 @@ done
 #--------------------------------------------------------------------
 
 cd /
-git clone https://github.com/mamonaco1973/module-azure-mini-ad.git
+# TEMPORARY (feature/ca-pem): clone this branch so a test DC gets the
+# /ca.pem route. Revert to a plain clone of main before merging.
+git clone -b feature/ca-pem \
+  https://github.com/mamonaco1973/module-azure-mini-ad.git
 cd module-azure-mini-ad/scripts
 cp maxids.service /etc/systemd/system/maxids.service
 sudo systemctl daemon-reload
